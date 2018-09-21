@@ -5,12 +5,30 @@ import (
 	"net/http"
 	"net/url"
 	"github.com/gorilla/websocket"
+	"github.com/BurntSushi/toml"
 	"time"
-	"flag"
 	"regexp"
 	"fmt"
 	"log"
 )
+
+type tomlConfig struct {
+	Servers 				map[string]Server
+	Access 					Access
+}
+
+type Server struct {
+	IP 						string
+	Port 					int
+	RconPassword 			string
+	RconPort 				int
+}
+
+type Access struct {
+	Port 					int
+	Password				string
+	Address 				string			`default="0.0.0.0"`
+}
 
 type Message struct {
 	Time					string			`json:"timestamp"`
@@ -52,20 +70,20 @@ type ServerStats struct {
 }
 
 type Player struct {
-	Name			string	`json:"name"`
-	ServiceTag		string	`json:"serviceTag"`
-//	Team			int		`json:"team"`
-	UID				string	`json:"uid"`
-//	PrimaryColor	string	`json:"primaryColor"`
-//	IsAlive			bool	`json:"isAlive"`
-//	Score			int		`json:"score"`
-//	Kills			int		`json:"kills"`
-//	Assists			int		`json:"assists"`
-//	Deaths			int		`json:"deaths"`
-//	Betrayals		int		`json:"betrayals"`
-//	TimeSpentAlive	int		`json:"timeSpentAlive"`
-//	Suicides		int		`json:"suicides"`
-//	BestStreak		int		`json:"bestStreak"`
+	Name					string			`json:"name"`
+	ServiceTag				string			`json:"serviceTag"`
+//	Team					int				`json:"team"`
+	UID						string			`json:"uid"`
+//	PrimaryColor			string			`json:"primaryColor"`
+//	IsAlive					bool			`json:"isAlive"`
+//	Score					int				`json:"score"`
+//	Kills					int				`json:"kills"`
+//	Assists					int				`json:"assists"`
+//	Deaths					int				`json:"deaths"`
+//	Betrayals				int				`json:"betrayals"`
+//	TimeSpentAlive			int				`json:"timeSpentAlive"`
+//	Suicides				int				`json:"suicides"`
+//	BestStreak				int				`json:"bestStreak"`
 }
 
 func (this Player) String() string{
@@ -74,8 +92,7 @@ func (this Player) String() string{
 
 var wsClients = []*websocket.Conn{}
 var upgrader = websocket.Upgrader{}
-var rconPort, serverPort, socketPort int
-var rconPass, serverAddress string
+var config tomlConfig
 var oldStats ServerStats
 
 var rconRegex = regexp.MustCompile(`\[(.+)\] <(.+)\/([a-f0-9]+)\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})> (.+)`)
@@ -102,6 +119,7 @@ func handleMsg(message string) *Message{
 }
 
 func handleReq(w http.ResponseWriter, r *http.Request){
+	log.Println("Connection from: ", r.RemoteAddr)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil{
 		w.WriteHeader(426)
@@ -160,27 +178,15 @@ func contains(s []Player, e Player) bool {
     return false
 }
 
-func main() {
-	flag.IntVar(&rconPort,"rPort", 11776, "Rcon Port")
-	flag.StringVar(&rconPass,"rPass", "", "Rcon Password")
-	flag.StringVar(&serverAddress,"sIP", "127.0.0.1", "Server Address")
-	flag.IntVar(&serverPort,"sPort", 11775, "Server Port")
-	flag.IntVar(&socketPort,"wsPort", 5000, "Local Socket Port")
-	flag.Parse()
-
-	http.HandleFunc("/", handleReq)
-	go func() {
-		http.ListenAndServe(fmt.Sprintf(":%d", socketPort), nil)
-	}()
-
-	rconURL := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", serverAddress, rconPort)}
-	serverURL := url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", serverAddress, serverPort)}
+func connect(serverName string, server Server){
+	rconURL := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", server.IP, server.RconPort)}
+	serverURL := url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", server.IP, server.Port)}
 	rconClient, _, err := dewDialer.Dial(rconURL.String(), nil)
 	if err != nil{
 		log.Fatal("Dial:", err)
 	}
-	if rconClient.WriteMessage(1, []byte(rconPass)) != nil{
-		log.Fatal(err)
+	if rconClient.WriteMessage(1, []byte(server.RconPassword)) != nil{
+		log.Fatal("Password:",err)
 	}
 
 	defer rconClient.Close()
@@ -201,11 +207,30 @@ func main() {
 		}
 	}()
 
-	func() {
+	go func() {
 		for range time.Tick(time.Second *5){
 			go readStats(serverURL.String())
 		}
 	}()
+}
 
+func main() {
+	
+	if _, err := toml.DecodeFile("config.toml", &config); err != nil{
+		log.Fatal("Config: ", err)
+	}
+
+	http.HandleFunc("/", handleReq)
+	func() {
+		for serverName, server := range config.Servers{
+			log.Println("Connecting to: ", serverName)
+			connect(serverName, server)
+		}
+	}()
+
+	func() {
+		http.ListenAndServe(fmt.Sprintf("%s:%d", config.Access.Address, config.Access.Port), nil)
+	}()
+	
 
 }

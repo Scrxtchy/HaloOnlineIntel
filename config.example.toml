@@ -1,0 +1,16 @@
+[servers]
+	[servers.alpha]
+	ip = "1.2.3.4"
+	port = 11775
+	rconport = 11776
+	rconpassword = "GOD"
+
+	[servers.beta]
+	ip = "1.2.3.4"
+	port = 11775
+	rconport = 11776
+	rconpassword = "GOD"
+
+[access]
+	port = 5008
+	password = "GOD"
