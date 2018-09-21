@@ -32,6 +32,7 @@ type Access struct {
 }
 
 type Message struct {
+	Server					string			`json:"server"`
 	Time					string			`json:"timestamp"`
 	Name					string			`json:"player"`
 	UID						string			`json:"UID"`
@@ -71,6 +72,7 @@ type ServerStats struct {
 }
 
 type Player struct {
+	Server					string			`json:"server"`
 	Name					string			`json:"name"`
 	ServiceTag				string			`json:"serviceTag"`
 	UID						string			`json:"uid"`
@@ -105,7 +107,7 @@ var dewDialer = &websocket.Dialer{
 	Subprotocols: 		[]string {"dew-rcon"},
 }
 
-func handleMsg(message string) *Message{
+func handleMsg(message string, serverName string) *Message{
 	matches:= rconRegex.FindStringSubmatch(message)
 	if len(matches) < 1{
 		return nil
@@ -116,6 +118,7 @@ func handleMsg(message string) *Message{
 	m.UID = matches[3]
 	m.IP = matches[4]
 	m.Message = matches[5]
+	m.Server = serverName
 	return m
 }
 
@@ -151,7 +154,7 @@ func wsSendPlayer(p Player){
 	}
 }
 
-func readStats(server *Server, url string){
+func readStats(server *Server, url string, serverName string){
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal("req:", err)
@@ -163,6 +166,7 @@ func readStats(server *Server, url string){
 	for _, element := range stats.Players{
 		if !contains(server.oldStats.Players, element){
 			log.Print(fmt.Sprintf("New Player: %s", element))
+			element.Server = serverName
 			go wsSendPlayer(element)
 		}
 	}
@@ -201,7 +205,7 @@ func connect(serverName string, server Server){
 				log.Println("read:", err)
 				return
 			}
-			m := handleMsg(string(message[:]))
+			m := handleMsg(string(message[:]), serverName)
 			if m != nil {
 				log.Println("recv:", m)
 				go wsSendMessage(m)
@@ -211,7 +215,7 @@ func connect(serverName string, server Server){
 
 	func() {
 		for range time.Tick(time.Second *5){
-			go readStats(&server, serverURL.String())
+			go readStats(&server, serverURL.String(), serverName)
 		}
 	}()
 }
