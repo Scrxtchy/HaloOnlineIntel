@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"github.com/gorilla/websocket"
 	"github.com/BurntSushi/toml"
+	"strings"
 	"time"
 	"regexp"
 	"fmt"
@@ -96,7 +97,8 @@ func (this Player) String() string{
 var wsClients = []*websocket.Conn{}
 var upgrader = websocket.Upgrader{}
 var config tomlConfig
-var oldStats ServerStats
+
+
 
 var rconRegex = regexp.MustCompile(`\[(.+)\] <(.+)\/([a-f0-9]+)\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})> (.+)`)
 var msgKey = rconRegex.SubexpNames()
@@ -123,12 +125,13 @@ func handleMsg(message string, serverName string) *Message{
 }
 
 func handleReq(w http.ResponseWriter, r *http.Request){
-	log.Println("Connection from:", r.RemoteAddr)
 	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil{
-		w.WriteHeader(426)
+	if err != nil || strings.TrimRight(r.URL.Path,"/") != fmt.Sprintf("/%s", config.Access.Password) {
+		log.Println("Invalid connection from:", r.RemoteAddr)
+		w.WriteHeader(426) //TODO: Handle Hijack? idk
 		return
 	}
+	log.Println("Connection from:", r.RemoteAddr)
 	wsClients = append(wsClients, conn)
 }
 
@@ -165,7 +168,7 @@ func readStats(server *Server, url string, serverName string){
 
 	for _, element := range stats.Players{
 		if !contains(server.oldStats.Players, element){
-			log.Print(fmt.Sprintf("New Player: %s", element))
+			log.Print(fmt.Sprintf("%s New Player: %s", serverName, element))
 			element.Server = serverName
 			go wsSendPlayer(element)
 		}
@@ -202,12 +205,12 @@ func connect(serverName string, server Server){
 		for {
 			_, message, err := rconClient.ReadMessage()
 			if err != nil {
-				log.Println("read:", err)
+				log.Println(serverName, err)
 				return
 			}
 			m := handleMsg(string(message[:]), serverName)
 			if m != nil {
-				log.Println("recv:", m)
+				log.Println(serverName, m)
 				go wsSendMessage(m)
 			}
 		}
