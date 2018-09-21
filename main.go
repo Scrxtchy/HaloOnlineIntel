@@ -22,6 +22,7 @@ type Server struct {
 	Port 					int
 	RconPassword 			string
 	RconPort 				int
+	oldStats				ServerStats
 }
 
 type Access struct {
@@ -72,8 +73,8 @@ type ServerStats struct {
 type Player struct {
 	Name					string			`json:"name"`
 	ServiceTag				string			`json:"serviceTag"`
-//	Team					int				`json:"team"`
 	UID						string			`json:"uid"`
+//	Team					int				`json:"team"`
 //	PrimaryColor			string			`json:"primaryColor"`
 //	IsAlive					bool			`json:"isAlive"`
 //	Score					int				`json:"score"`
@@ -150,7 +151,7 @@ func wsSendPlayer(p Player){
 	}
 }
 
-func readStats(url string){
+func readStats(server *Server, url string){
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal("req:", err)
@@ -160,12 +161,12 @@ func readStats(url string){
 	json.NewDecoder(resp.Body).Decode(&stats)
 
 	for _, element := range stats.Players{
-		if !contains(oldStats.Players, element){
+		if !contains(server.oldStats.Players, element){
 			log.Print(fmt.Sprintf("New Player: %s", element))
 			go wsSendPlayer(element)
 		}
 	}
-	oldStats = stats
+	server.oldStats = stats
 }
 
 func contains(s []Player, e Player) bool {
@@ -209,7 +210,7 @@ func connect(serverName string, server Server){
 
 	go func() {
 		for range time.Tick(time.Second *5){
-			go readStats(serverURL.String())
+			go readStats(&server, serverURL.String())
 		}
 	}()
 }
@@ -217,13 +218,13 @@ func connect(serverName string, server Server){
 func main() {
 	
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil{
-		log.Fatal("Config: ", err)
+		log.Fatal("Config:", err)
 	}
 
 	http.HandleFunc("/", handleReq)
 	func() {
 		for serverName, server := range config.Servers{
-			log.Println("Connecting to: ", serverName)
+			log.Println("Connecting to:", serverName)
 			connect(serverName, server)
 		}
 	}()
