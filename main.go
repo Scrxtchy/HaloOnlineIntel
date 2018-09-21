@@ -120,7 +120,7 @@ func handleMsg(message string) *Message{
 }
 
 func handleReq(w http.ResponseWriter, r *http.Request){
-	log.Println("Connection from: ", r.RemoteAddr)
+	log.Println("Connection from:", r.RemoteAddr)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil{
 		w.WriteHeader(426)
@@ -186,6 +186,7 @@ func connect(serverName string, server Server){
 	if err != nil{
 		log.Fatal("Dial:", err)
 	}
+	
 	if rconClient.WriteMessage(1, []byte(server.RconPassword)) != nil{
 		log.Fatal("Password:",err)
 	}
@@ -208,7 +209,7 @@ func connect(serverName string, server Server){
 		}
 	}()
 
-	go func() {
+	func() {
 		for range time.Tick(time.Second *5){
 			go readStats(&server, serverURL.String())
 		}
@@ -225,7 +226,7 @@ func main() {
 	func() {
 		for serverName, server := range config.Servers{
 			log.Println("Connecting to:", serverName)
-			connect(serverName, server)
+			go connect(serverName, server)
 		}
 	}()
 
