@@ -32,7 +32,7 @@ type Access struct {
 	Address 				string			`default="0.0.0.0"`
 }
 
-type Message struct {
+type Chat struct {
 	Server					string			`json:"server"`
 	Time					string			`json:"timestamp"`
 	Name					string			`json:"player"`
@@ -41,10 +41,9 @@ type Message struct {
 	Message					string			`json:"message"`
 }
 
-func (this Message) String() string{
+func (this Chat) String() string{
 	return fmt.Sprintf("[%s] <%s/%s/%s> %s", this.Time, this.Name, this.UID, this.IP, this.Message)
 }
-
 
 type ServerStats struct {
 	Name					string			`json:"name"`
@@ -98,7 +97,7 @@ var wsClients = []*websocket.Conn{}
 var upgrader = websocket.Upgrader{}
 var config tomlConfig
 
-
+var toSend []interface{}
 
 var rconRegex = regexp.MustCompile(`\[(.+)\] <(.+)\/([a-f0-9]+)\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})> (.+)`)
 var msgKey = rconRegex.SubexpNames()
@@ -109,12 +108,12 @@ var dewDialer = &websocket.Dialer{
 	Subprotocols: 		[]string {"dew-rcon"},
 }
 
-func handleMsg(message string, serverName string) *Message{
+func handleMsg(message string, serverName string) *Chat{
 	matches:= rconRegex.FindStringSubmatch(message)
 	if len(matches) < 1{
 		return nil
 	}
-	m := new(Message)
+	m := new(Chat)
 	m.Time = matches[1]
 	m.Name = matches[2]
 	m.UID = matches[3]
@@ -135,7 +134,7 @@ func handleReq(w http.ResponseWriter, r *http.Request){
 	wsClients = append(wsClients, conn)
 }
 
-func wsSendMessage(m *Message){
+func wsSendMessage(m interface{}) {
 	if wsClients != nil{
 		for i, client := range wsClients{
 			if client.WriteJSON(m) != nil{
@@ -146,34 +145,34 @@ func wsSendMessage(m *Message){
 	}
 }
 
-func wsSendPlayer(p Player){
-	if wsClients != nil{
-		for i, client := range wsClients{
-			if client.WriteJSON(p) != nil{
-				wsClients = append(wsClients[:i], wsClients[i+1:]...)
-				client.Close()
-			}
-		}
+func wsLoop() {
+	for {
+		if len(toSend) != 0 {
+			wsSendMessage(toSend[0])
+			toSend = append(toSend[:0], toSend[1:]...)
+		}	
 	}
 }
 
 func readStats(server *Server, url string, serverName string){
-	resp, err := http.Get(url)
+	req, err := http.Get(url)
 	if err != nil {
 		log.Fatal("req:", err)
-	}
-	var stats ServerStats
+	} else{
+		var stats ServerStats
 
-	json.NewDecoder(resp.Body).Decode(&stats)
+		json.NewDecoder(req.Body).Decode(&stats)
+		req.Body.Close()
 
-	for _, element := range stats.Players{
-		if !contains(server.oldStats.Players, element){
-			log.Print(fmt.Sprintf("%s New Player: %s", serverName, element))
-			element.Server = serverName
-			go wsSendPlayer(element)
+		for _, element := range stats.Players{
+			if !contains(server.oldStats.Players, element){
+				log.Print(fmt.Sprintf("%s New Player: %s", serverName, element))
+				element.Server = serverName
+				toSend = append(toSend, element)
+			}
 		}
+		server.oldStats = stats
 	}
-	server.oldStats = stats
 }
 
 func contains(s []Player, e Player) bool {
@@ -187,6 +186,7 @@ func contains(s []Player, e Player) bool {
 }
 
 func connect(serverName string, server Server){
+	
 	rconURL := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", server.IP, server.RconPort)}
 	serverURL := url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", server.IP, server.Port)}
 	rconClient, _, err := dewDialer.Dial(rconURL.String(), nil)
@@ -211,13 +211,14 @@ func connect(serverName string, server Server){
 			m := handleMsg(string(message[:]), serverName)
 			if m != nil {
 				log.Println(serverName, m)
-				go wsSendMessage(m)
+				toSend = append(toSend, m)
 			}
 		}
 	}()
 
+
 	func() {
-		for range time.Tick(time.Second *5){
+		for range time.Tick(time.Second *1){
 			go readStats(&server, serverURL.String(), serverName)
 		}
 	}()
@@ -237,9 +238,8 @@ func main() {
 		}
 	}()
 
+	go wsLoop()
 	func() {
 		http.ListenAndServe(fmt.Sprintf("%s:%d", config.Access.Address, config.Access.Port), nil)
 	}()
-	
-
 }
