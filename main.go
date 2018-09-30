@@ -239,7 +239,5 @@ func main() {
 	}()
 
 	go wsLoop()
-	func() {
-		http.ListenAndServe(fmt.Sprintf("%s:%d", config.Access.Address, config.Access.Port), nil)
-	}()
+	http.ListenAndServe(fmt.Sprintf("%s:%d", config.Access.Address, config.Access.Port), nil)
 }
