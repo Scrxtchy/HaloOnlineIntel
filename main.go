@@ -155,15 +155,14 @@ func wsLoop() {
 }
 
 func readStats(server *Server, url string, serverName string){
-	req, err := http.Get(url)
+	resp, err := http.Get(url)
 	if err != nil {
-		log.Fatal("req:", err)
-	} else{
+		log.Fatal("resp:", err)
+	} else if resp.StatusCode == http.StatusOK {
 		var stats ServerStats
 
-		json.NewDecoder(req.Body).Decode(&stats)
-		req.Body.Close()
-
+		json.NewDecoder(resp.Body).Decode(&stats)
+		resp.Body.Close()
 		for _, element := range stats.Players{
 			if !contains(server.oldStats.Players, element){
 				log.Print(fmt.Sprintf("%s New Player: %s", serverName, element))
@@ -185,6 +184,21 @@ func contains(s []Player, e Player) bool {
     return false
 }
 
+func rconLoop(rconClient *websocket.Conn, serverName string){
+	for {
+		_, message, err := rconClient.ReadMessage()
+		if err != nil {
+			log.Println(serverName, err)
+		} else {
+			m := handleMsg(string(message[:]), serverName)
+			if m != nil {
+				log.Println(serverName, m)
+				toSend = append(toSend, m)
+			}
+		}
+	}
+}
+
 func connect(serverName string, server Server){
 	
 	rconURL := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", server.IP, server.RconPort)}
@@ -199,23 +213,7 @@ func connect(serverName string, server Server){
 	}
 
 	defer rconClient.Close()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			_, message, err := rconClient.ReadMessage()
-			if err != nil {
-				log.Println(serverName, err)
-				return
-			}
-			m := handleMsg(string(message[:]), serverName)
-			if m != nil {
-				log.Println(serverName, m)
-				toSend = append(toSend, m)
-			}
-		}
-	}()
-
+	go rconLoop(rconClient, serverName)
 
 	func() {
 		for range time.Tick(time.Second *1){
@@ -231,7 +229,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", handleReq)
-	func() {
+	go func() {
 		for serverName, server := range config.Servers{
 			log.Println("Connecting to:", serverName)
 			go connect(serverName, server)
